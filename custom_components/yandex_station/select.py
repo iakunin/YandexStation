@@ -59,6 +59,15 @@ async def async_setup_entry(hass, entry, async_add_entities):
         True,
     )
 
+    async_add_entities(
+        [
+            YandexBrightness(quasar, sp)
+            for sp in quasar.speakers
+            if sp["quasar_info"]["platform"] in EQUALIZER_PLATFORMS
+        ],
+        True,
+    )
+
     entities = []
 
     for quasar, device, config in hass_utils.incluce_devices(hass, entry):
@@ -145,6 +154,71 @@ class YandexEqualizer(SelectEntity):
 
         except Exception as e:
             _LOGGER.warning("Не удалось изменить эквалайзер", exc_info=e)
+
+
+# noinspection PyAbstractClass
+class YandexBrightness(SelectEntity):
+    _attr_current_option: str | None = None
+    _attr_entity_registry_enabled_default = False
+    _attr_icon = "mdi:brightness-5"
+    _attr_options = ["auto", "0.0", "0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "1.0"]
+    _attr_translation_key = "brightness"
+
+    def __init__(self, quasar: YandexQuasar, device: dict):
+        self.quasar = quasar
+        self.device = device
+
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device["quasar_info"]["device_id"])},
+            name=self.device["name"],
+        )
+        self._attr_name = device["name"] + " Яркость"
+        self._attr_unique_id = device["quasar_info"]["device_id"] + f"_brightness"
+
+        self.entity_id = f"select.yandex_station_{self._attr_unique_id.lower()}"
+
+    async def async_update(self):
+        try:
+            config, _ = await self.quasar.get_device_config(self.device)
+            brightness = (config.get("led") or {}).get("brightness")
+            if brightness:
+                if brightness["auto"]:
+                    self._attr_current_option = "auto"
+                else:
+                    self._attr_current_option = f"{brightness["value"]:.1f}"
+
+        except Exception as e:
+            _LOGGER.warning("Не удалось загрузить яркость", exc_info=e)
+
+    async def async_select_option(self, option: str):
+        try:
+            config, version = await self.quasar.get_device_config(self.device)
+
+            led: dict = config.get("led")
+            if not led:
+                # init default brightness
+                led = {
+                    "brightness": {
+                        "auto": True,
+                        "value": 0.5
+                    }
+                }
+
+            if option == "auto":
+                led["brightness"]["auto"] = True
+            else:
+                led["brightness"]["auto"] = False
+                led["brightness"]["value"] = float(option)
+
+            config["led"] = led
+
+            await self.quasar.set_device_config(self.device, config, version)
+
+            self._attr_current_option = option
+            self._async_write_ha_state()
+
+        except Exception as e:
+            _LOGGER.warning("Не удалось изменить яркость", exc_info=e)
 
 
 # noinspection PyAbstractClass
